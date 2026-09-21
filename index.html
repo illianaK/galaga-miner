@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Galaga P2E Bitcoin Node</title>
     <style>
         body {
@@ -14,19 +14,18 @@
             display: flex;
             flex-direction: column;
             align-items: center;
-            justify-content: center;
-            height: 100vh;
+            justify-content: flex-start;
+            min-height: 100vh;
             overflow: hidden;
+            touch-action: none;
         }
         #game-container {
             position: relative;
             border: 4px solid #00ffff;
             box-shadow: 0 0 25px rgba(0, 255, 255, 0.3);
+            margin-top: 10px;
         }
-        canvas {
-            background: #000;
-            display: block;
-        }
+        canvas { background: #000; display: block; }
         .hud-overlay {
             position: absolute;
             top: 10px;
@@ -34,29 +33,58 @@
             right: 10px;
             display: flex;
             justify-content: space-between;
-            font-size: 16px;
+            font-size: 14px;
             pointer-events: none;
             text-shadow: 1px 1px 2px #000;
         }
-        .btn-panel {
-            margin-top: 15px;
+        #touch-controls {
             display: flex;
-            gap: 10px;
-            width: 440px;
+            justify-content: space-between;
+            align-items: center;
+            width: 100%;
+            max-width: 440px;
+            padding: 15px 20px;
+            box-sizing: border-box;
+            margin-top: 10px;
         }
-        button {
-            flex: 1;
-            background-color: #00ffff;
-            color: #020202;
-            border: none;
-            padding: 12px;
+        .control-pad { display: flex; gap: 15px; }
+        .touch-btn {
+            background-color: rgba(0, 255, 255, 0.15);
+            color: #00ffff;
+            border: 2px solid #00ffff;
+            border-radius: 50%;
+            width: 65px;
+            height: 65px;
             font-family: 'Courier New', monospace;
             font-weight: bold;
-            font-size: 14px;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .touch-btn:active {
+            background-color: rgba(0, 255, 255, 0.5);
+            color: #020202;
+            box-shadow: 0 0 15px #00ffff;
+        }
+        #fire-btn { background-color: rgba(255, 0, 0, 0.2); border-color: #ff0000; color: #ff0000; width: 75px; height: 75px; font-size: 16px; }
+        #fire-btn:active { background-color: rgba(255, 0, 0, 0.6); color: #ffffff; box-shadow: 0 0 15px #ff0000; }
+        .btn-panel { margin-top: 5px; width: 100%; max-width: 440px; padding: 0 20px; box-sizing: border-box; }
+        .cashout-btn {
+            width: 100%;
+            background-color: #00ff00;
+            color: #020202;
+            border: none;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-weight: bold;
+            font-size: 13px;
             cursor: pointer;
         }
-        button:hover { background-color: #00bfff; }
-        button:disabled { background-color: #223333; color: #555; cursor: not-allowed; }
+        .cashout-btn:disabled { background-color: #223322; color: #445544; cursor: not-allowed; }
     </style>
 </head>
 <body>
@@ -66,219 +94,22 @@
         <div>SCORE: <span id="ui-score" style="color: #ff00ff;">0.00000000 BTC</span></div>
         <div>SATS: <span id="ui-sats" style="color: #00ff00;">0</span></div>
     </div>
-    <canvas id="galagaCanvas" width="440" height="550"></canvas>
+    <canvas id="galagaCanvas" width="440" height="480"></canvas>
+</div>
+
+<div id="touch-controls">
+    <div class="control-pad">
+        <div id="left-btn" class="touch-btn">◀</div>
+        <div id="right-btn" class="touch-btn">▶</div>
+    </div>
+    <div id="fire-btn" class="touch-btn">FIRE</div>
 </div>
 
 <div class="btn-panel">
-    <button id="withdraw-btn" onclick="triggerWithdrawal()" disabled>CASH OUT VIA LIGHTNING</button>
+    <button id="withdraw-btn" class="cashout-btn" onclick="triggerWithdrawal()" disabled>CASH OUT VIA LIGHTNING</button>
 </div>
 
-<script>
-    const canvas = document.getElementById("galagaCanvas");
-    const ctx = canvas.getContext("2d");
-
-    // Game State Variables
-    let score = 0; // Tracks structural score
-    let satoshis = 0; // 1 Satoshi = 0.00000001 BTC
-    let gameActive = true;
-    let player = { x: 200, y: 480, width: 30, height: 30, speed: 5 };
-    let lasers = [];
-    let enemies = [];
-    let stars = [];
-    let keys = {};
-
-    // Generate classic background moving stardust
-    for(let i=0; i<40; i++) {
-        stars.push({ x: Math.random() * canvas.width, y: Math.random() * canvas.height, speed: Math.random() * 2 + 1 });
-    }
-
-    // Initialize an enemy grid grid layout resembling early waves
-    function initEnemies() {
-        enemies = [];
-        for (let row = 0; row < 3; row++) {
-            for (let col = 0; col < 8; col++) {
-                enemies.push({
-                    x: 50 + col * 45,
-                    y: 60 + row * 40,
-                    width: 25,
-                    height: 20,
-                    points: (3 - row) * 100,
-                    direction: 1,
-                    moveTimer: 0
-                });
-            }
-        }
-    }
-    initEnemies();
-
-    // Event Handling Setup
-    window.addEventListener("keydown", e => keys[e.code] = true);
-    window.addEventListener("keyup", e => keys[e.code] = false);
-
-    function update() {
-        if (!gameActive) return;
-
-        // Player Controls & Screen Boundaries
-        if (keys["ArrowLeft"] && player.x > 0) player.x -= player.speed;
-        if (keys["ArrowRight"] && player.x < canvas.width - player.width) player.x += player.speed;
-        if (keys["Space"]) {
-            if (lasers.length === 0 || lasers[lasers.length - 1].y < player.y - 80) {
-                lasers.push({ x: player.x + player.width/2 - 2, y: player.y, width: 4, height: 12 });
-            }
-        }
-
-        // Background Star Update
-        stars.forEach(star => {
-            star.y += star.speed;
-            if (star.y > canvas.height) star.y = 0;
-        });
-
-        // Lasers Movement Logic
-        lasers.forEach((laser, lIdx) => {
-            laser.y -= 7;
-            if (laser.y < 0) lasers.splice(lIdx, 1);
-        });
-
-        // Enemy Grid Shifting Patterns
-        let globalShift = false;
-        enemies.forEach(enemy => {
-            enemy.moveTimer++;
-            if(enemy.moveTimer % 60 === 0) {
-                enemy.x += 15 * enemy.direction;
-                if(enemy.x > canvas.width - enemy.width || enemy.x < 0) {
-                    globalShift = true;
-                }
-            }
-        });
-
-        if(globalShift) {
-            enemies.forEach(enemy => {
-                enemy.direction *= -1;
-                enemy.y += 10;
-            });
-        }
-
-        // Collision Matrix Analysis
-        lasers.forEach((laser, lIdx) => {
-            enemies.forEach((enemy, eIdx) => {
-                if (laser.x < enemy.x + enemy.width &&
-                    laser.x + laser.width > enemy.x &&
-                    laser.y < enemy.y + enemy.height &&
-                    laser.y + laser.height > enemy.y) {
-                    
-                    // Award score and calculate micro-Satoshi metrics
-                    score += enemy.points;
-                    satoshis += 1; // 1 Sat credited per confirmed kill
-                    
-                    enemies.splice(eIdx, 1);
-                    lasers.splice(lIdx, 1);
-                    updateUI();
-
-                    if(enemies.length === 0) {
-                        triggerAdInterstitials("Stage Cleared! Loading network video stream ad...");
-                    }
-                }
-            });
-        });
-    }
-
-    function draw() {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-        // Render Starfield background
-        ctx.fillStyle = "#ffffff";
-        stars.forEach(star => ctx.fillRect(star.x, star.y, 2, 2));
-
-        // Render Player Starship (Classic Galaga Triangle Layout)
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.moveTo(player.x + player.width / 2, player.y);
-        ctx.lineTo(player.x, player.y + player.height);
-        ctx.lineTo(player.x + player.width, player.y + player.height);
-        ctx.closePath();
-        ctx.fill();
-        // Red wings highlight
-        ctx.fillStyle = "#ff0000";
-        ctx.fillRect(player.x, player.y + player.height - 10, 4, 10);
-        ctx.fillRect(player.x + player.width - 4, player.y + player.height - 10, 4, 10);
-
-        // Render Active Weapons Lasers
-        ctx.fillStyle = "#ffff00";
-        lasers.forEach(laser => ctx.fillRect(laser.x, laser.y, laser.width, laser.height));
-
-        // Render Alien Invaders Array
-        enemies.forEach(enemy => {
-            ctx.fillStyle = enemy.points === 300 ? "#ff0000" : (enemy.points === 200 ? "#0000ff" : "#00ff00");
-            ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
-            // Alien eyes matrix decoration
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(enemy.x + 4, enemy.y + 4, 3, 3);
-            ctx.fillRect(enemy.x + enemy.width - 7, enemy.y + 4, 3, 3);
-        });
-
-        if (!gameActive) {
-            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = "#00ffff";
-            ctx.font = "20px 'Courier New'";
-            ctx.textAlign = "center";
-            ctx.fillText("[ STREAMING VIDEO ADVERT ]", canvas.width / 2, canvas.height / 2 - 20);
-            ctx.font = "14px 'Courier New'";
-            ctx.fillStyle = "#888888";
-            ctx.fillText("Generating ad network revenue sharing tokens...", canvas.width / 2, canvas.height / 2 + 10);
-        }
-    }
-
-    function updateUI() {
-        let btcString = (satoshis * 0.00000001).toFixed(8);
-        document.getElementById("ui-score").innerText = `${btcString} BTC`;
-        document.getElementById("ui-sats").innerText = satoshis;
-        if (satoshis > 0) document.getElementById("withdraw-btn").disabled = false;
-    }
-
-    function triggerAdInterstitials(consoleMsg) {
-        gameActive = false;
-        console.log(consoleMsg);
-        
-        // Simulates external video ad provider completion callback loop
-        setTimeout(() => {
-            gameActive = true;
-            initEnemies();
-            console.log("Ad validation cleared. Node master wallet topped up.");
-        }, 4000); // 4-second simulated interstitial ad loop
-    }
-
-    async function triggerWithdrawal() {
-        const lnAddress = prompt("Enter your Lightning Address (e.g., walletname@zbd.gg) to withdraw:");
-        if (!lnAddress) return;
-
-        try {
-            // Outbound connection endpoint string routed to secure payout backend layer
-            const res = await fetch("http://localhost:3000/api/payout", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ address: lnAddress, amount: satoshis })
-            });
-            const payload = await res.json();
-            
-            if (payload.success) {
-                alert(`Payout complete! Trans ID: ${payload.checking_id}`);
-                satoshis = 0;
-                updateUI();
-            } else {
-                alert(`System Error: ${payload.message}`);
-            }
-        } catch (e) {
-            alert("Backend infrastructure disconnected. Please check that server.js is running.");
-        }
-    }
-
-    function loop() {
-        update();
-        draw();
-        requestAnimationFrame(loop);
-    }
-    loop();
-</script>
+<!-- LINK TO SEPARATE JAVASCRIPT FILE -->
+<script src="script.js"></script>
 </body>
 </html>
